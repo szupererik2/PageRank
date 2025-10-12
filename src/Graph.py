@@ -23,7 +23,7 @@ class Graph:
         if node not in self.adj_list:
             raise NodeNotFoundError(f'Selected node {node} does not exist')
         
-        return len(self.adj_list[node])
+        return list(self.adj_list[node])
     
     def in_degree(self, node):
         if node not in self.adj_list:
