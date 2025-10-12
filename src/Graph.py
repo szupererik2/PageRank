@@ -30,3 +30,6 @@ class Graph:
             raise NodeNotFoundError(f'Selected node {node} does not exist')
         
         return [src for src, dests in self.adj_list.items() if node in dests]
+
+    def get_nodes(self):
+        return list(self.adj_list.keys())
