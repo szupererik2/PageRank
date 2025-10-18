@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import ast, os, sys
+import ast, os, sys, warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -47,7 +47,9 @@ def collect_defs(root: str) -> Dict[str, Tuple[str, str, int]]:
     for fp in find_py_files(root):
         try:
             src = open(fp, 'r', encoding='utf-8').read()
-            tree = ast.parse(src)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', SyntaxWarning)
+                tree = ast.parse(src, filename=fp)
         except Exception:
             continue
         module = modulename(root, fp)
@@ -81,7 +83,9 @@ def build_graph(root: str) -> Graph:
     for fp in find_py_files(root):
         try:
             src = open(fp, 'r', encoding='utf-8').read()
-            tree = ast.parse(src)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', SyntaxWarning)
+                tree = ast.parse(src, filename=fp)
         except Exception:
             continue
         module = modulename(root, fp)
