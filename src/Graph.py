@@ -12,10 +12,9 @@ class Graph:
 
     def add_edge(self, src, dest):
         if src not in self.adj_list:
-            raise NodeNotFoundError(f'Source node {src} does not exist')
-        
+            self.add_node(src)
         if dest not in self.adj_list:
-            raise NodeNotFoundError(f'Destination node {dest} does not exist')
+            self.add_node(dest)
         
         self.adj_list[src].append(dest)
 
