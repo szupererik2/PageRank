@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-import ast, os, sys, warnings
+import ast
+import os
+import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-repo_root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(repo_root))
 from src.Graph import Graph
+
+
+def find_py_files(root: str):
+    for dp, dirs, files in os.walk(root):
+        if any(x in dp for x in (os.sep + '.venv', os.sep + 'venv', os.sep + '.git', os.sep + '__pycache__')):
+            continue
+        for f in files:
+            if f.endswith('.py'):
+                yield os.path.join(dp, f)
+
 
 def modulename(root: str, filepath: str) -> str:
     p = Path(filepath).resolve()
@@ -20,19 +30,12 @@ def modulename(root: str, filepath: str) -> str:
         parts = parts[:-1]
     return '.'.join(parts) if parts else p.stem
 
-def find_py_files(root: str):
-    for dp, dirs, files in os.walk(root):
-        if any(x in dp for x in (os.sep + '.venv', os.sep + 'venv', os.sep + '.git', os.sep + '__pycache__')):
-            continue
-        for f in files:
-            if f.endswith('.py'):
-                yield os.path.join(dp, f)
 
-def expr_to_name(expr):
+def expr_to_name(expr: ast.AST) -> str | None:
     if isinstance(expr, ast.Name):
         return expr.id
     if isinstance(expr, ast.Attribute):
-        parts = []
+        parts: List[str] = []
         cur = expr
         while isinstance(cur, ast.Attribute):
             parts.append(cur.attr)
@@ -41,6 +44,7 @@ def expr_to_name(expr):
             parts.append(cur.id)
             return '.'.join(reversed(parts))
     return None
+
 
 def collect_defs(root: str) -> Dict[str, Tuple[str, str, int]]:
     defs: Dict[str, Tuple[str, str, int]] = {}
@@ -54,32 +58,43 @@ def collect_defs(root: str) -> Dict[str, Tuple[str, str, int]]:
             continue
         module = modulename(root, fp)
         stack: List[str] = []
+
         class V(ast.NodeVisitor):
-            def visit_FunctionDef(self, node):
+            def visit_FunctionDef(self, node: ast.FunctionDef):
                 qual = '.'.join(stack + [node.name]) if stack else node.name
                 fq = f"{module}:{qual}"
                 defs[fq] = (module, qual, node.lineno)
                 stack.append(node.name)
                 self.generic_visit(node)
                 stack.pop()
-            def visit_AsyncFunctionDef(self, node):
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
                 self.visit_FunctionDef(node)
-            def visit_ClassDef(self, node):
+
+            def visit_ClassDef(self, node: ast.ClassDef):
                 stack.append(node.name)
                 self.generic_visit(node)
                 stack.pop()
+
         V().visit(tree)
+
     return defs
 
-def build_graph(root: str) -> Graph:
+
+def build_graph(root: str, use_regex: bool = False) -> Graph:
+    if use_regex:
+        return build_graph_regex(root)
+
     defs = collect_defs(root)
     name_to_fqs: Dict[str, List[str]] = {}
     for fq in defs:
-        name = fq.split(':',1)[1].split('.')[-1]
-        name_to_fqs.setdefault(name, []).append(fq)
+        short = fq.split(':', 1)[1].split('.')[-1]
+        name_to_fqs.setdefault(short, []).append(fq)
+
     g = Graph()
     for fq in defs:
         g.add_node(fq)
+
     for fp in find_py_files(root):
         try:
             src = open(fp, 'r', encoding='utf-8').read()
@@ -90,8 +105,9 @@ def build_graph(root: str) -> Graph:
             continue
         module = modulename(root, fp)
         stack: List[str] = []
+
         class C(ast.NodeVisitor):
-            def visit_FunctionDef(self, node):
+            def visit_FunctionDef(self, node: ast.FunctionDef):
                 qual = '.'.join(stack + [node.name]) if stack else node.name
                 caller = f"{module}:{qual}"
                 stack.append(node.name)
@@ -108,7 +124,7 @@ def build_graph(root: str) -> Graph:
                                 resolved = candidates[0]
                             else:
                                 for c in candidates:
-                                    if c.startswith(module+':'):
+                                    if c.startswith(module + ':'):
                                         resolved = c
                                         break
                                 if not resolved and candidates:
@@ -119,34 +135,126 @@ def build_graph(root: str) -> Graph:
                                 resolved = candidates[0]
                             else:
                                 for c in candidates:
-                                    if c.startswith(module+':'):
+                                    if c.startswith(module + ':'):
                                         resolved = c
                                         break
                                 if not resolved and candidates:
                                     resolved = candidates[0]
+
                         if resolved and resolved != caller:
                             try:
                                 g.add_edge(caller, resolved)
                             except Exception:
                                 pass
+
                 self.generic_visit(node)
                 stack.pop()
-            def visit_AsyncFunctionDef(self, node):
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
                 self.visit_FunctionDef(node)
-            def visit_ClassDef(self, node):
+
+            def visit_ClassDef(self, node: ast.ClassDef):
                 stack.append(node.name)
                 self.generic_visit(node)
                 stack.pop()
+
         C().visit(tree)
+
     return g
 
-def main(argv):
-    root = argv[1] if len(argv) > 1 else os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    root = os.path.abspath(root)
-    g = build_graph(root)
-    print(len(g.get_nodes()))
-    total_edges = sum(len(v) for v in g.adj_list.values())
-    print(total_edges)
+
+def build_graph_regex(root: str) -> Graph:
+    import re
+
+    func_def_re = re.compile(r'^\s*def\s+(\w+)\s*\(')
+    class_def_re = re.compile(r'^\s*class\s+(\w+)\s*[:\(]')
+    call_re = re.compile(r'([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(')
+
+    defs: Dict[str, Tuple[str, str, int]] = {}
+    calls_in_func: Dict[str, List[Tuple[str, List[str]]]] = {}
+
+    for fp in find_py_files(root):
+        try:
+            raw = open(fp, 'r', encoding='utf-8').read()
+        except Exception:
+            continue
+        raw_nostr = re.sub(r"(\"\"\".*?\"\"\"|''' .*?'''|\".*?\"|'.*?')", '', raw, flags=re.S)
+        lines = raw_nostr.splitlines()
+        module = modulename(root, fp)
+
+        class_stack: List[Tuple[str, int]] = []  # (name, indent)
+        func_stack: List[Tuple[str, int]] = []
+
+        for lineno, line in enumerate(lines, start=1):
+            m = class_def_re.match(line)
+            if m:
+                indent = len(line) - len(line.lstrip(' '))
+                class_stack.append((m.group(1), indent))
+                continue
+            cur_indent = len(line) - len(line.lstrip(' '))
+            while class_stack and cur_indent <= class_stack[-1][1] and line.strip():
+                class_stack.pop()
+
+            mf = func_def_re.match(line)
+            if mf:
+                fname = mf.group(1)
+                qual_parts = [c for c, _ in class_stack] + [fname]
+                qual = '.'.join(qual_parts) if qual_parts else fname
+                fq = f"{module}:{qual}"
+                defs[fq] = (module, qual, lineno)
+                func_stack.append((fq, len(line) - len(line.lstrip(' '))))
+                calls_in_func.setdefault(fp, []).append((fq, []))
+                continue
+            if func_stack:
+                f_indent = func_stack[-1][1]
+                if cur_indent <= f_indent and line.strip():
+                    func_stack.pop()
+                else:
+                    for callm in call_re.finditer(line):
+                        call_name = callm.group(1)
+                        if calls_in_func.get(fp):
+                            calls_in_func[fp][-1][1].append(call_name)
+
+    name_to_fqs: Dict[str, List[str]] = {}
+    for fq in defs:
+        short = fq.split(':', 1)[1].split('.')[-1]
+        name_to_fqs.setdefault(short, []).append(fq)
+
+    g = Graph()
+    for fq in defs:
+        g.add_node(fq)
+
+    for fp, funcs in calls_in_func.items():
+        module = modulename(root, fp)
+        for fqcaller, call_list in funcs:
+            for called in call_list:
+                tail = called.split('.')[-1]
+                resolved = None
+                candidates = name_to_fqs.get(tail, [])
+                if len(candidates) == 1:
+                    resolved = candidates[0]
+                else:
+                    for c in candidates:
+                        if c.startswith(module + ':'):
+                            resolved = c
+                            break
+                    if not resolved and candidates:
+                        resolved = candidates[0]
+
+                if resolved and resolved != fqcaller:
+                    try:
+                        g.add_edge(fqcaller, resolved)
+                    except Exception:
+                        pass
+
+    return g
+
 
 if __name__ == '__main__':
-    main(sys.argv)
+    import sys
+
+    root = sys.argv[1] if len(sys.argv) > 1 else '.'
+    root = os.path.abspath(root)
+    g = build_graph(root)
+    print(len(g.adj_list))
+    print(sum(len(v) for v in g.adj_list.values()))
