@@ -15,27 +15,20 @@ class Graph:
             self.add_node(dest)
         self.adj_list[src].append(dest)
 
-    def visualise(self, backend: str | None = None):
+    def visualise(self):
         try:
-            import matplotlib
-            if backend:
-                matplotlib.use(backend)
-            else:
-                if os.name == 'posix' and not os.environ.get('DISPLAY'):
-                    matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            import networkx as nx
-        except Exception:
-            print("visualise: skipped (networkx/matplotlib not available)")
-            return
+            from graphviz import Digraph
+        except ImportError as e:
+            raise ImportError("The 'graphviz' package is required to use visualise(). Install it with pip.") from e
+        
+        dot = Digraph(comment='Graph')
+        for node in self.adj_list:
+            dot.node(str(node))
 
-        G = nx.DiGraph()
         for src, dests in self.adj_list.items():
             for dest in dests:
-                G.add_edge(src, dest)
+                dot.edge(str(src), str(dest))
 
-        pos = nx.spring_layout(G)
-        nx.draw(G, pos, with_labels=True, node_color="skyblue", node_size=2000,
-                arrowstyle="->", arrowsize=20, font_size=12, font_weight="bold")
-        plt.show()
-        plt.close()
+        output_path = dot.render(filename='graph', format='png', view=True, cleanup=True)
+        return output_path
+

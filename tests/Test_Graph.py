@@ -13,7 +13,7 @@ def test_visualise():
     g.add_edge("C", "E")
     g.add_edge("E", "A")
 
-    sub = get_subgraph_from_node(g, "A", 2)
+    sub = get_subgraph_from_node(g, "A", 100)
 
     sub.visualise()
 
