@@ -63,3 +63,23 @@ if __name__ == '__main__':
         print('Rendered top graph to', rendered)
     except Exception:
         traceback.print_exc()
+
+    try:
+        if hasattr(g, 'get_nodes'):
+            node_count = len(list(g.get_nodes()))
+        elif hasattr(g, 'adj_list'):
+            node_count = len(g.adj_list)
+        else:
+            node_count = 0
+    except Exception:
+        node_count = 0
+
+    try:
+        if hasattr(g, 'adj_list'):
+            edge_count = sum(len(v) for v in g.adj_list.values())
+        else:
+            edge_count = sum(len(list(g.out_degree(n))) for n in g.get_nodes())
+    except Exception:
+        edge_count = 0
+
+    print(f"Graph size: nodes={node_count}, edges={edge_count}")
