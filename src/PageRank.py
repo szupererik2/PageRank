@@ -1,20 +1,10 @@
-"""PageRank implementations.
-
-This module provides a backward-compatible RankPage() function but implements
-an optimized, vectorized PageRank under the hood. It prefers a SciPy sparse
-matrix representation when available and falls back to dense NumPy arrays.
-
-The implementation also handles dangling nodes correctly by distributing
-their weight uniformly at each iteration.
-"""
-
 from typing import Dict
 
 alpha = 0.15
 
 try:
     import numpy as np
-except Exception as e:  # pragma: no cover - numpy should be present in most envs
+except Exception as e:
     raise ImportError("NumPy is required for the optimized PageRank implementation") from e
 
 _HAS_SCIPY = False
@@ -26,17 +16,9 @@ except Exception:
 
 
 def _build_matrix(g, nodes, use_sparse: bool = True):
-    """Build the column-stochastic transition matrix M where M[i, j] = 1/outdeg(j)
-    if there is an edge j -> i. Returns (M, dangling_mask).
-
-    M will be a scipy.sparse.csr_matrix when scipy is available and use_sparse is True,
-    otherwise a dense NumPy array of shape (n, n).
-    dangling_mask is a boolean array of length n where True marks a dangling node.
-    """
     n = len(nodes)
     index = {node: i for i, node in enumerate(nodes)}
 
-    # collect data for sparse construction
     rows = []
     cols = []
     data = []
@@ -51,7 +33,6 @@ def _build_matrix(g, nodes, use_sparse: bool = True):
             for dest in outs:
                 i = index.get(dest)
                 if i is None:
-                    # if dest not present in nodes list (shouldn't happen), skip
                     continue
                 rows.append(i)
                 cols.append(j)
@@ -70,16 +51,6 @@ def _build_matrix(g, nodes, use_sparse: bool = True):
 
 
 def RankPage(g, epsilon: float = 1e-6, max_iter: int = 100, use_sparse: bool = True) -> Dict:
-    """Compute PageRank for graph-like object g.
-
-    Parameters:
-    - g: graph-like with get_nodes() -> list and out_degree(node) -> iterable of neighbors
-    - epsilon: convergence tolerance (L1 change)
-    - max_iter: maximum iterations
-    - use_sparse: prefer SciPy sparse matrix when available
-
-    Returns dict node -> rank value.
-    """
     if not hasattr(g, 'get_nodes') or not callable(getattr(g, 'get_nodes')):
         raise TypeError("RankPage's parameter must be a graph-like object with a get_nodes() method")
 
@@ -90,16 +61,13 @@ def RankPage(g, epsilon: float = 1e-6, max_iter: int = 100, use_sparse: bool = T
     n = len(nodes)
     M, dangling_mask = _build_matrix(g, nodes, use_sparse=use_sparse)
 
-    # initialize PR vector
     pr = np.full(n, 1.0 / n, dtype=float)
 
-    # teleportation vector (uniform)
     teleport = alpha / n
 
     for _ in range(max_iter):
         prev = pr.copy()
 
-        # contribution from dangling nodes: sum of their ranks distributed uniformly
         dangling_sum = prev[dangling_mask].sum() if dangling_mask.any() else 0.0
 
         if _HAS_SCIPY and use_sparse and isinstance(M, sp.spmatrix):
@@ -113,14 +81,10 @@ def RankPage(g, epsilon: float = 1e-6, max_iter: int = 100, use_sparse: bool = T
         if delta < epsilon:
             break
 
-    # map back to node labels
     return {node: float(pr[i]) for i, node in enumerate(nodes)}
 
 
-# Keep the original RankCalc available for reference/backwards-compatibility if
-# other code imports it. It is unchanged but no longer used by RankPage.
 def RankCalc(g, PR):
-    """Legacy (slow) PageRank step kept for compatibility/tests."""
     new_PR = {}
     nodes = g.get_nodes()
     n = len(nodes)
